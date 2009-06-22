@@ -6,6 +6,7 @@ FIND_IDLES_CMD = 'rusers -a'
 CLUSTER_DIR = "/proj/ciptmp/#{MY_USER}/cluster/"
 RUN_WATCHER_CMD = "bin/watcher.rb"
 TIMEOUT = 5
+PROBLEM_SIZE = 1000
 
 class CIPClusterMaster
 	def get_idles( test )
@@ -41,7 +42,7 @@ class CIPClusterMaster
 		
 		return ret_val
 		else
-			return [ "faui02o", "faui02n", "faui02m" ]
+			return [ "faui02o", "faui02n", "faui02m", "faui02l", "faui02k" ]
 		end
 	end
 
@@ -151,6 +152,36 @@ class CIPClusterMaster
 	def send_signal( nodes, signal )
 		nodes.each do |node|
 			FileUtils.touch "#{CLUSTER_DIR}#{node}/#{signal}"	
+			sleep 0.1 # allow for NFS synchronization
+		end
+	end
+
+	def create_initial_savepoints( nodes )
+		i = 0
+		print "Please enter upper bound: "
+		my_upper = STDIN.readline.to_i
+
+		nodes.each do |node|
+			my_int_low = 1 + i*my_upper/nodes.length
+			my_int_high = (i+1)*my_upper/nodes.length
+
+			Dir.chdir "#{CLUSTER_DIR}/bin" do
+				fork {
+					exec "./create_savepoint.rb", "#{CLUSTER_DIR}#{node}/status", "#{my_int_low}", "#{my_int_high}"
+				}
+				fork {
+					exec "./create_config.rb", "#{CLUSTER_DIR}#{node}/config", "prim.rb", "status"
+				}
+			end
+
+			i += 1
+			sleep 0.1
+		end	
+	end
+
+	def show_results( nodes )
+		nodes.each do |node|
+
 		end
 	end
 end
@@ -159,7 +190,6 @@ class CIPClusterControl
 
 	def initialize
 		@my_master = CIPClusterMaster.new
-		@my_nodez = []
 		@my_nodez = []
 	end
 
@@ -177,11 +207,12 @@ class CIPClusterControl
 			puts "* [4] Show states of nodes            *"
 			puts "* [5] Stop work on nodes              *"
 			puts "* [6] Terminate watchers              *"
-			puts "* [7] Exit                            *"
+			puts "* [7] Distribute work                 *"
+			puts "* [8] Exit                            *"
 			puts "***************************************"
 			print "Please enter option: "	
 			my_option = STDIN.readline.to_i
-		end while my_option < 1 || my_option > 7
+		end while my_option < 1 || my_option > 8
 
 		case my_option
 		when 1
@@ -197,6 +228,8 @@ class CIPClusterControl
 		when 6
 			@my_master.send_signal( @my_nodez, "kill" )
 		when 7
+			@my_master.create_initial_savepoints( @my_nodez )
+		when 8
 			@my_master.send_signal( @my_nodez, "kill" )
 			exit 0
 		end
